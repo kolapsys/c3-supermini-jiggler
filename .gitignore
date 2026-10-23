@@ -1,0 +1,15 @@
+# PlatformIO
+.pio/
+
+# Editor settings
+.vscode/
+.idea/
+
+# Build outputs
+*.elf
+*.bin
+*.map
+
+# OS files
+.DS_Store
+Thumbs.db
