@@ -81,7 +81,8 @@ The hardware-independent idle timer tests can be run on a host with a C++17
 compiler:
 
 ```sh
-g++ -std=c++17 -Wall -Wextra -Werror -Iinclude tests/mouse_activity_tests.cpp -o /tmp/mouse_activity_tests
+g++ -std=c++17 -Wall -Wextra -Werror -Iinclude \
+    tests/mouse_activity_tests.cpp -o /tmp/mouse_activity_tests
 /tmp/mouse_activity_tests
 ```
 
