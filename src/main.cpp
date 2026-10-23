@@ -2,6 +2,7 @@
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
 #include <esp_log.h>
+#include <vector>
 
 #include "mouse_activity.h"
 
@@ -15,11 +16,11 @@ constexpr int16_t kJiggleSquareSide = 10;
 constexpr uint8_t kBootButtonPin = 9;
 constexpr uint8_t kLedPin = 8;
 constexpr uint32_t kButtonDebounceMs = 50;
-constexpr uint32_t kLedBlinkIntervalMs = 1000;
+constexpr uint32_t kPairingLedBlinkIntervalMs = 250;
+constexpr uint32_t kPairingLongPressMs = 2000;
+constexpr uint32_t kPairingConnectionStableMs = 2000;
+constexpr uint32_t kConnectionLedFeedbackMs = 3000;
 constexpr uint8_t kLedBrightness = 40;
-constexpr uint16_t kMinConnectionInterval = 6;
-constexpr uint16_t kMaxConnectionInterval = 12;
-constexpr uint16_t kConnectionTimeout = 400;
 constexpr char kTag[] = "mouse-jiggler";
 
 constexpr uint8_t kMouseReportMap[] = {
@@ -68,8 +69,62 @@ bool jiggleEnabled = false;
 bool rawButtonState = HIGH;
 bool stableButtonState = HIGH;
 uint32_t buttonStateChangedAt = 0;
+uint32_t buttonPressedAt = 0;
+bool longPressHandled = false;
 uint32_t ledLastToggleAt = 0;
 bool ledOn = false;
+bool pairingMode = false;
+bool connectionLedFeedback = false;
+uint32_t connectionLedFeedbackStartedAt = 0;
+bool pairingSessionActive = false;
+bool pairingConnectionPending = false;
+uint32_t pairingConnectionStartedAt = 0;
+bool bondDeletionPending = false;
+uint32_t bleConnectionStartedAt = 0;
+
+void updateStatusLed(uint32_t now);
+
+void deleteSavedBonds() {
+    Serial.println("Deleting saved BLE bonds");
+    if (!NimBLEDevice::deleteAllBonds()) {
+        Serial.println("ERROR: Could not delete all saved BLE bonds");
+    }
+}
+
+void startPairingAdvertising() {
+    hidServer->advertiseOnDisconnect(true);
+    NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+    if (!advertising->isAdvertising() && !advertising->start()) {
+        Serial.println("ERROR: Could not start BLE advertising for pairing");
+    }
+}
+
+void processPendingBondDeletion() {
+    if (!bondDeletionPending || hidServer->getConnectedCount() != 0) {
+        return;
+    }
+
+    deleteSavedBonds();
+    bondDeletionPending = false;
+    startPairingAdvertising();
+}
+
+void processPairingConnection(uint32_t now) {
+    if (!pairingConnectionPending || hidServer->getConnectedCount() == 0) {
+        return;
+    }
+
+    if (static_cast<uint32_t>(now - pairingConnectionStartedAt) >=
+        kPairingConnectionStableMs) {
+        pairingConnectionPending = false;
+        pairingSessionActive = false;
+        pairingMode = false;
+        connectionLedFeedback = true;
+        connectionLedFeedbackStartedAt = now;
+        updateStatusLed(now);
+        Serial.println("BLE pairing complete; flashing LED three times");
+    }
+}
 
 class HostReportCallbacks final : public NimBLECharacteristicCallbacks {
     void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&, uint16_t subValue) override {
@@ -78,22 +133,33 @@ class HostReportCallbacks final : public NimBLECharacteristicCallbacks {
 };
 
 class HostServerCallbacks final : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
-        activity->noteActivity(millis());
+    void onConnect(NimBLEServer*, NimBLEConnInfo& connInfo) override {
+        const uint32_t now = millis();
+        activity->noteActivity(now);
         jiggleSequenceActive = false;
+        bleConnectionStartedAt = now;
+        if (pairingSessionActive) {
+            pairingConnectionPending = true;
+            pairingConnectionStartedAt = now;
+        }
         Serial.printf("Computer connected; BLE interval %.1f ms\n",
                       connInfo.getConnInterval() * 1.25f);
-        server->updateConnParams(connInfo.getConnHandle(),
-                                 kMinConnectionInterval,
-                                 kMaxConnectionInterval,
-                                 0,
-                                 kConnectionTimeout);
     }
 
     void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason) override {
-        activity->noteActivity(millis());
+        const uint32_t now = millis();
+        activity->noteActivity(now);
         jiggleSequenceActive = false;
-        Serial.printf("Computer disconnected (reason %d)\n", reason);
+        if (pairingSessionActive) {
+            pairingConnectionPending = false;
+            pairingMode = true;
+            ledOn = true;
+            ledLastToggleAt = now;
+        }
+        Serial.printf("Computer disconnected after %lu ms (reason %d: %s)\n",
+                      static_cast<unsigned long>(now - bleConnectionStartedAt),
+                      reason,
+                      NimBLEUtils::returnCodeToString(reason));
     }
 
     void onConnParamsUpdate(NimBLEConnInfo& connInfo) override {
@@ -180,48 +246,104 @@ void processIdleJiggle(uint32_t now) {
     nextJiggleStepAt = now + kJiggleStepIntervalMs;
 }
 
-void updateStatusLed(uint32_t now, bool resetBlink = false) {
-    if (!jiggleEnabled) {
-        ledOn = false;
-        digitalWrite(kLedPin, HIGH);
-        return;
-    }
-
-    if (resetBlink) {
-        ledOn = true;
-        ledLastToggleAt = now;
-    } else if (static_cast<uint32_t>(now - ledLastToggleAt) >= kLedBlinkIntervalMs / 2) {
-        ledOn = !ledOn;
-        ledLastToggleAt = now;
+void updateStatusLed(uint32_t now) {
+    if (pairingMode) {
+        if (static_cast<uint32_t>(now - ledLastToggleAt) >=
+            kPairingLedBlinkIntervalMs / 2) {
+            ledOn = !ledOn;
+            ledLastToggleAt = now;
+        }
+    } else if (connectionLedFeedback) {
+        const uint32_t elapsed = static_cast<uint32_t>(now - connectionLedFeedbackStartedAt);
+        if (elapsed >= kConnectionLedFeedbackMs) {
+            connectionLedFeedback = false;
+            ledOn = jiggleEnabled;
+        } else {
+            const uint32_t phase = elapsed * 6 / kConnectionLedFeedbackMs;
+            ledOn = phase % 2 == 0;
+        }
+    } else {
+        ledOn = jiggleEnabled;
     }
     digitalWrite(kLedPin, ledOn ? LOW : HIGH);
 }
 
-void updateJiggleToggle(uint32_t now) {
-    const bool reading = digitalRead(kBootButtonPin);
-    if (reading != rawButtonState) {
-        rawButtonState = reading;
-        buttonStateChangedAt = now;
+void enterPairingMode(uint32_t now) {
+    pairingSessionActive = true;
+    pairingConnectionPending = false;
+    pairingMode = true;
+    jiggleSequenceActive = false;
+    activity->noteActivity(now);
+    ledOn = true;
+    ledLastToggleAt = now;
+    updateStatusLed(now);
+    Serial.println("BLE pairing mode enabled");
+
+    hidServer->advertiseOnDisconnect(false);
+    NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+    if (advertising->isAdvertising()) {
+        advertising->stop();
     }
 
-    if (static_cast<uint32_t>(now - buttonStateChangedAt) < kButtonDebounceMs ||
-        stableButtonState == rawButtonState) {
-        return;
+    const std::vector<uint16_t> peers = hidServer->getPeerDevices();
+    bondDeletionPending = !peers.empty();
+    for (uint16_t connHandle : peers) {
+        if (!hidServer->disconnect(connHandle)) {
+            Serial.printf("Could not disconnect BLE host on connection %u\n", connHandle);
+        }
     }
 
-    stableButtonState = rawButtonState;
-    if (stableButtonState != LOW) {
-        return;
+    if (!bondDeletionPending) {
+        deleteSavedBonds();
+        startPairingAdvertising();
     }
+}
 
+void enterStartupPairingMode(uint32_t now) {
+    pairingSessionActive = true;
+    pairingConnectionPending = false;
+    pairingMode = true;
+    ledOn = true;
+    ledLastToggleAt = now;
+    updateStatusLed(now);
+    Serial.println("No BLE computer connected at startup; entering pairing mode (saved bonds preserved)");
+}
+
+void toggleJiggler(uint32_t now) {
     jiggleEnabled = !jiggleEnabled;
     jiggleSequenceActive = false;
     activity->noteActivity(now);
     if (!jiggleEnabled && hidServer->getConnectedCount() > 0) {
         notifyHost(0, 0, 0);
     }
-    updateStatusLed(now, jiggleEnabled);
+    updateStatusLed(now);
     Serial.printf("Jiggler %s\n", jiggleEnabled ? "enabled" : "disabled");
+}
+
+void updateButton(uint32_t now) {
+    const bool reading = digitalRead(kBootButtonPin);
+    if (reading != rawButtonState) {
+        rawButtonState = reading;
+        buttonStateChangedAt = now;
+    }
+
+    if (rawButtonState != stableButtonState &&
+        static_cast<uint32_t>(now - buttonStateChangedAt) >= kButtonDebounceMs) {
+        const bool previousStableState = stableButtonState;
+        stableButtonState = rawButtonState;
+        if (previousStableState == HIGH && stableButtonState == LOW) {
+            buttonPressedAt = now;
+            longPressHandled = false;
+        } else if (previousStableState == LOW && stableButtonState == HIGH && !longPressHandled) {
+            toggleJiggler(now);
+        }
+    }
+
+    if (rawButtonState == LOW && stableButtonState == LOW && !longPressHandled &&
+        static_cast<uint32_t>(now - buttonPressedAt) >= kPairingLongPressMs) {
+        longPressHandled = true;
+        enterPairingMode(now);
+    }
 }
 
 void setupMouseHid() {
@@ -249,7 +371,14 @@ void setupMouseHid() {
     NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
     advertising->setAppearance(HID_MOUSE);
     advertising->addServiceUUID(hid->getHidService()->getUUID());
-    if (!advertising->setName(kDeviceName) || !advertising->start()) {
+    if (!advertising->setName(kDeviceName)) {
+        ESP_LOGE(kTag, "Could not configure BLE mouse advertising");
+        abort();
+    }
+    if (hidServer->getConnectedCount() == 0) {
+        enterStartupPairingMode(millis());
+    }
+    if (!advertising->start()) {
         ESP_LOGE(kTag, "Could not advertise HID mouse");
         abort();
     }
@@ -291,8 +420,10 @@ void setup() {
 
 void loop() {
     const uint32_t now = millis();
-    updateJiggleToggle(now);
+    updateButton(now);
     updateStatusLed(now);
+    processPendingBondDeletion();
+    processPairingConnection(now);
     processIdleJiggle(now);
     delay(5);
 }
