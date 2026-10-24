@@ -1,9 +1,31 @@
 #include <cassert>
 #include <cstdint>
 
+#include "jiggler_config.h"
 #include "mouse_activity.h"
 
 int main() {
+    JigglerConfig config;
+    assert(parseJigglerConfigCommand("CFG,10,60,10", config));
+    assert(config.idleTimeoutSeconds == 10);
+    assert(config.repeatIntervalSeconds == 60);
+    assert(config.squareSidePixels == 10);
+    assert(parseJigglerConfigCommand("CFG,3600,1,100", config));
+    assert(config.idleTimeoutSeconds == 3600);
+    assert(config.repeatIntervalSeconds == 1);
+    assert(config.squareSidePixels == 100);
+    assert(!parseJigglerConfigCommand("CFG,0,60,10", config));
+    assert(!parseJigglerConfigCommand("CFG,10,3601,10", config));
+    assert(!parseJigglerConfigCommand("CFG,10,60,101", config));
+    assert(!parseJigglerConfigCommand("CFG,10,60,10x", config));
+    assert(!parseJigglerConfigCommand("CFG,4294967296,60,10", config));
+    assert(!parseJigglerConfigCommand("CFG,,60,10", config));
+    assert(!parseJigglerConfigCommand("CFG,10,60", config));
+    assert(!parseJigglerConfigCommand(nullptr, config));
+    assert(config.idleTimeoutSeconds == 3600);
+    assert(config.repeatIntervalSeconds == 1);
+    assert(config.squareSidePixels == 100);
+
     MouseActivity activity(10'000, 60'000, 100);
     assert(!activity.shouldJiggle(10'099));
     assert(activity.shouldJiggle(10'100));

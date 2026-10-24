@@ -1,20 +1,22 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
+#include <Preferences.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <array>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
+#include "jiggler_config.h"
 #include "mouse_activity.h"
 
 namespace {
 
 constexpr char kDeviceName[] = "BT Mouse";
-constexpr uint32_t kIdleTimeoutMs = 10000;
-constexpr uint32_t kJiggleIntervalMs = 60000;
 constexpr uint32_t kJiggleStepIntervalMs = 25;
-constexpr int16_t kJiggleSquareSide = 10;
 constexpr uint8_t kBootButtonPin = 9;
 constexpr uint8_t kLedPin = 8;
 constexpr uint32_t kButtonDebounceMs = 50;
@@ -24,6 +26,8 @@ constexpr uint32_t kPairingConnectionStableMs = 2000;
 constexpr uint32_t kConnectionLedFeedbackMs = 3000;
 constexpr char kTag[] = "mouse-jiggler";
 constexpr uint8_t kLeftMouseButton = 0x01;
+constexpr uint8_t kJiggleReportCount = 6;
+constexpr size_t kSerialCommandBufferSize = 48;
 
 struct MouseReport {
     uint8_t buttons;
@@ -31,16 +35,17 @@ struct MouseReport {
     int16_t y;
 };
 
-constexpr MouseReport kJiggleReports[] = {
-    {0, kJiggleSquareSide, 0},
-    {0, 0, kJiggleSquareSide},
-    {0, -kJiggleSquareSide, 0},
-    {0, 0, -kJiggleSquareSide},
-    {kLeftMouseButton, 0, 0},
-    {0, 0, 0},
-};
-constexpr size_t kJiggleReportCount =
-    sizeof(kJiggleReports) / sizeof(kJiggleReports[0]);
+std::array<MouseReport, kJiggleReportCount> makeJiggleReports(uint32_t squareSidePixels) {
+    const int16_t side = static_cast<int16_t>(squareSidePixels);
+    return {{
+        {0, side, 0},
+        {0, 0, side},
+        {0, static_cast<int16_t>(-side), 0},
+        {0, 0, static_cast<int16_t>(-side)},
+        {kLeftMouseButton, 0, 0},
+        {0, 0, 0},
+    }};
+}
 
 struct BleConnectionEvent {
     bool connected;
@@ -87,7 +92,12 @@ constexpr uint8_t kMouseReportMap[] = {
 
 NimBLEServer* hidServer = nullptr;
 NimBLECharacteristic* mouseInput = nullptr;
-MouseActivity activity(kIdleTimeoutMs, kJiggleIntervalMs, 0);
+JigglerConfig jigglerConfig;
+std::array<MouseReport, kJiggleReportCount> jiggleReports =
+    makeJiggleReports(jigglerConfig.squareSidePixels);
+MouseActivity activity(jigglerConfig.idleTimeoutSeconds * 1000,
+                       jigglerConfig.repeatIntervalSeconds * 1000,
+                       0);
 QueueHandle_t bleConnectionEvents = nullptr;
 bool jiggleSequenceActive = false;
 uint8_t jiggleStep = 0;
@@ -108,8 +118,106 @@ bool pairingConnectionPending = false;
 uint32_t pairingConnectionStartedAt = 0;
 bool bondDeletionPending = false;
 uint32_t bleConnectionStartedAt = 0;
+char serialCommandBuffer[kSerialCommandBufferSize]{};
+size_t serialCommandLength = 0;
 
 void updateStatusLed(uint32_t now);
+
+void loadJigglerConfig() {
+    static_assert(sizeof(JigglerConfig) == 3 * sizeof(uint32_t));
+    Preferences preferences;
+    if (!preferences.begin("jiggler", true)) {
+        Serial.println("ERROR: Could not open settings storage; using defaults");
+        return;
+    }
+
+    const size_t storedSize = preferences.getBytesLength("config");
+    if (storedSize == sizeof(JigglerConfig)) {
+        JigglerConfig storedConfig;
+        if (preferences.getBytes("config", &storedConfig, sizeof(storedConfig)) ==
+                sizeof(storedConfig) &&
+            isValidJigglerConfig(storedConfig)) {
+            jigglerConfig = storedConfig;
+        } else {
+            Serial.println("WARNING: Stored settings are invalid; using defaults");
+        }
+    } else if (storedSize != 0) {
+        Serial.println("WARNING: Stored settings have an unsupported size; using defaults");
+    }
+    preferences.end();
+
+    jiggleReports = makeJiggleReports(jigglerConfig.squareSidePixels);
+    activity = MouseActivity(jigglerConfig.idleTimeoutSeconds * 1000,
+                             jigglerConfig.repeatIntervalSeconds * 1000,
+                             millis());
+    Serial.printf("Jiggle settings: idle %lu s, repeat %lu s, square %lu px\n",
+                  static_cast<unsigned long>(jigglerConfig.idleTimeoutSeconds),
+                  static_cast<unsigned long>(jigglerConfig.repeatIntervalSeconds),
+                  static_cast<unsigned long>(jigglerConfig.squareSidePixels));
+}
+
+void processSerialCommand(const char* command) {
+    if (std::strcmp(command, "PING") == 0) {
+        Serial.println("CONFIG_READY");
+        return;
+    }
+
+    JigglerConfig requestedConfig;
+    if (!parseJigglerConfigCommand(command, requestedConfig)) {
+        Serial.println("CONFIG_ERROR: Invalid settings");
+        return;
+    }
+
+    Preferences preferences;
+    if (!preferences.begin("jiggler", false)) {
+        Serial.println("CONFIG_ERROR: Could not open settings storage");
+        return;
+    }
+
+    const size_t written =
+        preferences.putBytes("config", &requestedConfig, sizeof(requestedConfig));
+    preferences.end();
+    if (written != sizeof(requestedConfig)) {
+        Serial.println("CONFIG_ERROR: Could not save settings");
+        return;
+    }
+
+    const uint32_t now = millis();
+    jigglerConfig = requestedConfig;
+    jiggleReports = makeJiggleReports(jigglerConfig.squareSidePixels);
+    activity = MouseActivity(jigglerConfig.idleTimeoutSeconds * 1000,
+                             jigglerConfig.repeatIntervalSeconds * 1000,
+                             now);
+    jiggleSequenceActive = false;
+    Serial.println("CONFIG_SAVED");
+}
+
+void processSerialCommands() {
+    while (Serial.available() > 0) {
+        const char value = static_cast<char>(Serial.read());
+        if (value == '\r') {
+            continue;
+        }
+        if (value == '\n') {
+            if (serialCommandLength > 0) {
+                serialCommandBuffer[serialCommandLength] = '\0';
+                processSerialCommand(serialCommandBuffer);
+                serialCommandLength = 0;
+            }
+            continue;
+        }
+
+        if (value < ' ' || value > '~' ||
+            serialCommandLength >= sizeof(serialCommandBuffer) - 1) {
+            serialCommandLength = 0;
+            while (Serial.available() > 0 && Serial.read() != '\n') {
+            }
+            Serial.println("CONFIG_ERROR: Invalid command");
+            continue;
+        }
+        serialCommandBuffer[serialCommandLength++] = value;
+    }
+}
 
 void enqueueBleConnectionEvent(const BleConnectionEvent& event) {
     if (bleConnectionEvents == nullptr ||
@@ -241,20 +349,21 @@ void processIdleJiggle(uint32_t now) {
         jiggleSequenceActive = true;
         jiggleStep = 0;
         nextJiggleStepAt = now;
-        Serial.println("Idle timeout reached; starting 10px square and left-click");
+        Serial.printf("Idle timeout reached; starting %lu px square and left-click\n",
+                      static_cast<unsigned long>(jigglerConfig.squareSidePixels));
     }
 
     if (static_cast<int32_t>(now - nextJiggleStepAt) < 0) {
         return;
     }
 
-    if (jiggleStep >= kJiggleReportCount) {
+    if (jiggleStep >= jiggleReports.size()) {
         jiggleSequenceActive = false;
         Serial.println("Idle square and left-click complete");
         return;
     }
 
-    const MouseReport& report = kJiggleReports[jiggleStep];
+    const MouseReport& report = jiggleReports[jiggleStep];
 
     if (!notifyHost(report.buttons, report.x, report.y)) {
         Serial.println("Idle jiggle report was not delivered; cancelling sequence");
@@ -426,7 +535,7 @@ void setup() {
         ESP_LOGE(kTag, "Could not create BLE connection event queue");
         abort();
     }
-    activity.noteActivity(millis());
+    loadJigglerConfig();
 
     if (!NimBLEDevice::init(kDeviceName)) {
         ESP_LOGE(kTag, "Could not initialize NimBLE");
@@ -442,8 +551,9 @@ void setup() {
 }
 
 void loop() {
-    const uint32_t now = millis();
     processBleConnectionEvents();
+    processSerialCommands();
+    const uint32_t now = millis();
     updateButton(now);
     updateStatusLed(now);
     processPendingBondDeletion();

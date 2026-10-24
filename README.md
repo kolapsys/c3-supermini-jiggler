@@ -3,8 +3,9 @@
 This project makes the ESP32-C3 Super Mini act as a standalone BLE mouse. USB
 provides power and serial logging; the computer pairs with **BT Mouse** over
 Bluetooth. No physical mouse is connected to the C3. When enabled and connected,
-the C3 waits 10 seconds, then moves the cursor around a 10-by-10-pixel square
-and sends a brief left-click. It repeats every 60 seconds.
+the C3 waits for the configured idle timeout, then moves the cursor around a
+configurable square and sends a brief left-click. It repeats at the configured
+interval.
 
 ![ESP32-S3 Super Mini pinout illustration supplied by the project owner](assets/pinout_esp32c3_super_mini.png)
 
@@ -23,7 +24,7 @@ restart pairing and erase all saved BLE bonds. The LED keeps blinking until a
 BLE computer connects and remains connected for 2 seconds. Brief connections
 that drop resume the pairing blink. After a stable connection, the LED flashes
 three times over three seconds, then returns to the normal enabled/disabled
-state. Enabling the function starts the 10-second initial delay.
+state. Enabling the function starts the configured idle timeout.
 
 ## Hardware and software
 
@@ -47,8 +48,14 @@ Use the browser installer on a desktop computer with the latest Chrome or Edge:
 1. Connect the C3 with a USB data cable.
 2. Open the [C3 Mouse Jiggler installer](https://kolapsys.github.io/c3-supermini-jiggler/).
 3. Click **Install**, select the ESP32-C3 serial port, and approve installation.
-4. Pair **BT Mouse** in your computer's Bluetooth settings. Installing clears
-   saved BLE bonds, so pair the mouse again after each flash.
+4. Set the idle timeout, repeat interval, and square size on the page. Click
+   **Save settings to C3** and select the board's serial port again.
+5. Pair **BT Mouse** in your computer's Bluetooth settings.
+
+The initial settings are a 10-second idle timeout, a 60-second repeat interval,
+and a 10-pixel square. Timeout and interval accept 1–3600 seconds; square size
+accepts 1–100 pixels. Settings are stored on the C3 and survive restarts.
+Reapply them after flashing, which clears saved settings and BLE bonds.
 
 If the installer says no device is available, try a USB data cable that supports
 data. You may also hold BOOT, press and release RESET, then release BOOT and
@@ -75,9 +82,9 @@ startup messages.
 
 1. Flash and restart the C3.
 2. In the computer's Bluetooth settings, pair **BT Mouse** as a mouse.
-3. Keep the computer paired and connected. While enabled, the C3 waits 10
-   seconds, sends the square movement and left-click, then repeats every 60
-   seconds.
+3. Keep the computer paired and connected. While enabled, the C3 waits for the
+   configured idle timeout, sends the square movement and left-click, then
+   repeats at the configured interval.
 4. Press BOOT to enable jiggling; it starts disabled. Press BOOT again to
    disable it. The blue LED stays on while enabled and is off when disabled.
    Hold BOOT for 2 seconds to disconnect the current computer and advertise for
@@ -102,8 +109,10 @@ g++ -std=c++17 -Wall -Wextra -Werror -Iinclude \
 /tmp/mouse_activity_tests
 ```
 
-The 10-second initial delay, 60-second repeat interval, LED blink rate, and
-10-pixel square are defined near the top of `src/main.cpp`.
+The hardware-independent tests cover idle timer behavior and validation of the
+installer's serial settings command. The 10-second idle timeout, 60-second
+repeat interval, and 10-pixel square are the defaults; use the browser
+installer to change them.
 
 ## License
 
