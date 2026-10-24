@@ -114,6 +114,10 @@ installer's serial settings command. The 10-second idle timeout, 60-second
 repeat interval, and 10-pixel square are the defaults; use the browser
 installer to change them.
 
+## Support
+
+If you find this project useful, you can [buy me a coffee](https://buymeacoffee.com/kolapsys).
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
