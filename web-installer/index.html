@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#142235">
+    <title>Install C3 Mouse Jiggler</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        color: #142235;
+        background: #f4f7fb;
+      }
+
+      body {
+        box-sizing: border-box;
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 48px 20px;
+      }
+
+      main {
+        padding: 32px;
+        border: 1px solid #dce3ec;
+        border-radius: 18px;
+        background: white;
+        box-shadow: 0 12px 36px #14223512;
+      }
+
+      h1 {
+        margin-top: 0;
+      }
+
+      li {
+        margin: 12px 0;
+      }
+
+      esp-web-install-button {
+        display: block;
+        margin: 28px 0;
+      }
+
+      a {
+        color: #1459a6;
+      }
+
+      .note {
+        padding: 14px 16px;
+        border-left: 4px solid #4586c6;
+        background: #edf5ff;
+      }
+
+      @media (max-width: 520px) {
+        body {
+          padding: 20px 12px;
+        }
+
+        main {
+          padding: 22px 18px;
+        }
+      }
+    </style>
+    <script
+      type="module"
+      src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
+    ></script>
+  </head>
+  <body>
+    <main>
+      <h1>Install C3 Mouse Jiggler</h1>
+      <p>Install the firmware on your ESP32-C3 Super Mini directly from your browser.</p>
+      <ol>
+        <li>Use a desktop computer with the latest Chrome or Edge.</li>
+        <li>Connect the C3 with a USB data cable.</li>
+        <li>Click <strong>Install</strong> below and choose the ESP32-C3 serial port.</li>
+        <li>Approve the prompt to erase and install the firmware.</li>
+      </ol>
+
+      <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+
+      <p class="note">
+        Installing replaces the firmware and clears saved BLE bonds. Pair
+        <strong>BT Mouse</strong> again in your computer's Bluetooth settings.
+        If the serial port does not appear, try another USB data cable or hold
+        BOOT while pressing and releasing RESET, then try again.
+      </p>
+
+      <p><a href="https://github.com/kolapsys/c3-supermini-jiggler">Project source and help</a></p>
+    </main>
+  </body>
+</html>

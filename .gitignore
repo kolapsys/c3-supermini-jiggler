@@ -9,6 +9,7 @@
 *.elf
 *.bin
 *.map
+dist/
 
 # OS files
 .DS_Store

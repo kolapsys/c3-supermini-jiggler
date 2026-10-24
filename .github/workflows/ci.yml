@@ -27,6 +27,43 @@ jobs:
       - name: Build firmware
         run: pio run
 
+      - name: Package browser installer
+        run: python3 scripts/package_web_installer.py
+
+      - name: Upload browser installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-installer
+          path: dist/
+
+  publish-pages:
+    name: Publish browser installer
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download browser installer
+        uses: actions/download-artifact@v4
+        with:
+          name: web-installer
+          path: dist/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
   host-tests:
     name: Run host timer tests
     runs-on: ubuntu-latest

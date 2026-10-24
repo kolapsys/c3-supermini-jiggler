@@ -40,7 +40,23 @@ BLE HID peripheral and supports one computer connection. USB CDC is enabled at
 boot so startup and BLE status messages are available through the USB serial
 port.
 
-## Build and flash
+## Easy install (recommended)
+
+Use the browser installer on a desktop computer with the latest Chrome or Edge:
+
+1. Connect the C3 with a USB data cable.
+2. Open the [C3 Mouse Jiggler installer](https://kolapsys.github.io/c3-supermini-jiggler/).
+3. Click **Install**, select the ESP32-C3 serial port, and approve installation.
+4. Pair **BT Mouse** in your computer's Bluetooth settings. Installing clears
+   saved BLE bonds, so pair the mouse again after each flash.
+
+If the installer says no device is available, try a USB data cable that supports
+data. You may also hold BOOT, press and release RESET, then release BOOT and
+retry. The first time this repository is set up, enable GitHub Pages using
+**Settings → Pages → Build and deployment → GitHub Actions**; updates to `main`
+publish the latest installer automatically.
+
+## Build and flash manually
 
 From this directory:
 
