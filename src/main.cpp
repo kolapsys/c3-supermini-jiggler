@@ -123,6 +123,13 @@ size_t serialCommandLength = 0;
 
 void updateStatusLed(uint32_t now);
 
+void logJigglerConfig() {
+    Serial.printf("Jiggle settings: idle timeout %lu s, interval %lu s, square edge %lu px\n",
+                  static_cast<unsigned long>(jigglerConfig.idleTimeoutSeconds),
+                  static_cast<unsigned long>(jigglerConfig.repeatIntervalSeconds),
+                  static_cast<unsigned long>(jigglerConfig.squareSidePixels));
+}
+
 void loadJigglerConfig() {
     static_assert(sizeof(JigglerConfig) == 3 * sizeof(uint32_t));
     Preferences preferences;
@@ -150,10 +157,7 @@ void loadJigglerConfig() {
     activity = MouseActivity(jigglerConfig.idleTimeoutSeconds * 1000,
                              jigglerConfig.repeatIntervalSeconds * 1000,
                              millis());
-    Serial.printf("Jiggle settings: idle %lu s, repeat %lu s, square %lu px\n",
-                  static_cast<unsigned long>(jigglerConfig.idleTimeoutSeconds),
-                  static_cast<unsigned long>(jigglerConfig.repeatIntervalSeconds),
-                  static_cast<unsigned long>(jigglerConfig.squareSidePixels));
+    logJigglerConfig();
 }
 
 void processSerialCommand(const char* command) {
@@ -189,6 +193,7 @@ void processSerialCommand(const char* command) {
                              jigglerConfig.repeatIntervalSeconds * 1000,
                              now);
     jiggleSequenceActive = false;
+    logJigglerConfig();
     Serial.println("CONFIG_SAVED");
 }
 
@@ -349,8 +354,11 @@ void processIdleJiggle(uint32_t now) {
         jiggleSequenceActive = true;
         jiggleStep = 0;
         nextJiggleStepAt = now;
-        Serial.printf("Idle timeout reached; starting %lu px square and left-click\n",
-                      static_cast<unsigned long>(jigglerConfig.squareSidePixels));
+        Serial.printf(
+            "Idle timeout reached; starting jiggle (idle timeout %lu s, interval %lu s, square edge %lu px) and left-click\n",
+            static_cast<unsigned long>(jigglerConfig.idleTimeoutSeconds),
+            static_cast<unsigned long>(jigglerConfig.repeatIntervalSeconds),
+            static_cast<unsigned long>(jigglerConfig.squareSidePixels));
     }
 
     if (static_cast<int32_t>(now - nextJiggleStepAt) < 0) {

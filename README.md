@@ -96,6 +96,8 @@ startup messages.
    A 2-second BOOT hold disconnects the current host and erases all saved BLE
    bonds, so computers must pair again.
 5. Check the serial monitor for BLE connection and jiggle-cycle messages.
+   The monitor logs the configured idle timeout, repeat interval, and square
+   edge at startup, after settings are saved, and when a jiggle begins.
    Disconnect messages include the reason text and how long the link was up.
 
 ## Test the idle timer
