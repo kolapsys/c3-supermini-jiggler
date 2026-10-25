@@ -1,4 +1,4 @@
-# ESP32-C3 Super Mini BLE Mouse Jiggler
+# ESP32-C3 Super Mini Jiggler
 
 This project makes the ESP32-C3 Super Mini act as a standalone BLE mouse. USB
 provides power and serial logging; the computer pairs with **BT Mouse** over
@@ -46,7 +46,7 @@ port.
 Use the browser installer on a desktop computer with the latest Chrome or Edge:
 
 1. Connect the C3 with a USB data cable.
-2. Open the [C3 Mouse Jiggler installer](https://kolapsys.github.io/c3-supermini-jiggler/).
+2. Open the [ESP32-C3 Super Mini Jiggler installer](https://kolapsys.github.io/esp32-c3-supermini-jiggler/).
 3. Click **Install**, select the ESP32-C3 serial port, and approve installation.
 4. Set the idle timeout, repeat interval, and square size on the page. Click
    **Save settings to C3** and select the board's serial port again.

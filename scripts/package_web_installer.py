@@ -51,7 +51,7 @@ def main() -> None:
     (DIST / "firmware.bin").write_bytes(firmware)
     shutil.copyfile(ROOT / "web-installer" / "index.html", DIST / "index.html")
     manifest = {
-        "name": "C3 Mouse Jiggler",
+        "name": "ESP32-C3 Super Mini Jiggler",
         "version": "1.0.0",
         "builds": [
             {
