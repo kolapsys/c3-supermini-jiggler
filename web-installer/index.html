@@ -114,7 +114,11 @@
 
       <section aria-labelledby="settings-title">
         <h2 id="settings-title">Jiggling settings</h2>
-        <p>These values are saved on the C3 and remain after it restarts.</p>
+        <p>
+          These values are saved on the C3 and remain after it restarts. If the
+          C3 does not respond during connection or saving, the installer times
+          out after 10 seconds.
+        </p>
         <label>
           Idle timeout before the first jiggle (seconds)
           <input id="idle-timeout" type="number" min="1" max="3600" step="1" value="10" required>
@@ -160,6 +164,7 @@
     <script>
       const settingsButton = document.querySelector("#save-settings");
       const settingsStatus = document.querySelector("#settings-status");
+      const serialResponseTimeoutMs = 10000;
 
       settingsButton.addEventListener("click", async () => {
         const fields = [
@@ -198,16 +203,28 @@
 
           try {
             const decoder = new TextDecoder();
-            async function waitForResponse(expected, timeoutMs) {
-              const timeoutId = window.setTimeout(
-                () => reader.cancel("Timed out"),
-                timeoutMs
-              );
+            async function waitForResponse(expected, timeoutMs, timeoutMessage) {
+              let timedOut = false;
+              let timeoutId;
+              const timeout = new Promise((_, reject) => {
+                timeoutId = window.setTimeout(() => {
+                  timedOut = true;
+                  reject(new Error(timeoutMessage));
+                }, timeoutMs);
+              });
+
               try {
                 while (true) {
-                  const { value, done } = await reader.read();
+                  const { value, done } = await Promise.race([
+                    reader.read(),
+                    timeout,
+                  ]);
                   if (done) {
-                    throw new Error("No response from the C3. Reconnect to the board and try again.");
+                    throw new Error(
+                      timedOut
+                        ? timeoutMessage
+                        : "The C3 disconnected before responding. Reconnect to the board and try again."
+                    );
                   }
                   response += decoder.decode(value);
                   const lines = response.split(/\r?\n/);
@@ -222,6 +239,17 @@
                     throw new Error(errorLine.trim());
                   }
                 }
+              } catch (error) {
+                if (timedOut) {
+                  try {
+                    await reader.cancel(timeoutMessage);
+                  } catch (cancelError) {
+                    throw new Error(
+                      `${timeoutMessage} Serial reader cleanup also failed: ${cancelError.message}`
+                    );
+                  }
+                }
+                throw error;
               } finally {
                 window.clearTimeout(timeoutId);
               }
@@ -229,10 +257,18 @@
 
             settingsStatus.textContent = "Connecting to the C3…";
             await writer.write(new TextEncoder().encode("PING\n"));
-            await waitForResponse("CONFIG_READY", 10000);
+            await waitForResponse(
+              "CONFIG_READY",
+              serialResponseTimeoutMs,
+              "Connection timed out: the C3 did not respond within 10 seconds. Reconnect the board and try again."
+            );
             settingsStatus.textContent = "Saving settings to the C3…";
             await writer.write(new TextEncoder().encode(command));
-            await waitForResponse("CONFIG_SAVED", 10000);
+            await waitForResponse(
+              "CONFIG_SAVED",
+              serialResponseTimeoutMs,
+              "Saving timed out: the C3 did not confirm the settings within 10 seconds. Reconnect the board and try again."
+            );
           } finally {
             await reader.cancel().catch(() => {});
             reader.releaseLock();
