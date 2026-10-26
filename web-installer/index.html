@@ -152,8 +152,11 @@
         </label>
         <label>
           Maximum run time (minutes; 0 means indefinitely)
-          <input id="run-duration" type="number" min="0" max="1440" step="1" value="0" required>
+          <input id="run-duration" type="number" min="0" max="1440" step="1" value="0" required disabled>
         </label>
+        <p id="run-duration-status" role="status">
+          Available with firmware v1.0.1 and newer. Select a firmware version to check.
+        </p>
         <button id="save-settings" type="button">Save settings to C3</button>
         <p id="settings-status" role="status" aria-live="polite">
           Flash the firmware first, then reconnect to the board here to save settings.
@@ -190,13 +193,18 @@
       const versionSelect = document.querySelector("#firmware-version");
       const versionStatus = document.querySelector("#firmware-version-status");
       const updateNotice = document.querySelector("#firmware-update-notice");
+      const runDurationInput = document.querySelector("#run-duration");
+      const runDurationStatus = document.querySelector("#run-duration-status");
       const versionManifests = new Map();
       const currentManifestUrl = new URL("manifest.json", document.baseURI).href;
       let currentFirmwareVersion = "unknown";
       const serialResponseTimeoutMs = 10000;
 
       function setFirmwareVersion(value, label, manifestUrl) {
-        versionManifests.set(value, manifestUrl);
+        versionManifests.set(value, {
+          manifestUrl,
+          firmwareVersion: value === "current" ? null : value,
+        });
         if (value === "current") {
           versionSelect.options[0].textContent = label;
           return;
@@ -247,10 +255,36 @@
         ) > 0;
       }
 
+      function supportsRunDuration(version) {
+        const parsedVersion = parseReleaseVersion(version);
+        if (!parsedVersion) {
+          return false;
+        }
+        const [major, minor, patch] = parsedVersion.core;
+        if (major !== 1) {
+          return major > 1;
+        }
+        if (minor !== 0) {
+          return minor > 0;
+        }
+        return patch > 1 || (patch === 1 && parsedVersion.prerelease === null);
+      }
+
+      function updateRunDurationAvailability(version) {
+        const available = supportsRunDuration(version);
+        runDurationInput.disabled = !available;
+        runDurationStatus.textContent = available
+          ? `Run duration is supported by firmware ${version}.`
+          : version
+            ? `Run duration requires firmware v1.0.1 or newer; ${version} does not support it.`
+            : "Could not determine the selected firmware version; run duration is disabled.";
+      }
+
       versionSelect.addEventListener("change", () => {
-        const manifestUrl = versionManifests.get(versionSelect.value);
-        if (manifestUrl) {
-          setInstallerManifest(manifestUrl);
+        const selectedFirmware = versionManifests.get(versionSelect.value);
+        if (selectedFirmware) {
+          setInstallerManifest(selectedFirmware.manifestUrl);
+          updateRunDurationAvailability(selectedFirmware.firmwareVersion);
         }
       });
 
@@ -270,11 +304,16 @@
             throw new Error("The installer version metadata is invalid.");
           }
           currentFirmwareVersion = currentMetadata.version;
-          versionManifests.set("current", currentManifestUrl);
+          versionManifests.set("current", {
+            manifestUrl: currentManifestUrl,
+            firmwareVersion: currentFirmwareVersion,
+          });
           versionSelect.options[0].textContent =
             `This installer build (${currentFirmwareVersion})`;
+          updateRunDurationAvailability(currentFirmwareVersion);
         } catch {
           versionSelect.options[0].textContent = "This installer build (local preview)";
+          updateRunDurationAvailability(null);
         }
 
         try {
@@ -324,7 +363,7 @@
             }
 
             setFirmwareVersion(
-              manifestUrl.href,
+              release.tag_name,
               `${release.tag_name}${release.prerelease ? " (pre-release)" : ""}`,
               manifestUrl.href
             );
@@ -357,8 +396,13 @@
           ["idle-timeout", 1, 3600],
           ["repeat-interval", 1, 3600],
           ["square-size", 1, 100],
-          ["run-duration", 0, 1440],
         ];
+        const selectedFirmware = versionManifests.get(versionSelect.value);
+        const runDurationSupported =
+          selectedFirmware && supportsRunDuration(selectedFirmware.firmwareVersion);
+        if (runDurationSupported) {
+          fields.push(["run-duration", 0, 1440]);
+        }
         const values = [];
         for (const [id, minimum, maximum] of fields) {
           const input = document.getElementById(id);
@@ -385,8 +429,7 @@
           await port.open({ baudRate: 115200 });
           const writer = port.writable.getWriter();
           const reader = port.readable.getReader();
-          const command =
-            `CFG,${values[0]},${values[1]},${values[2]},${values[3]}\n`;
+          const command = `CFG,${values.join(",")}\n`;
           let response = "";
 
           try {
