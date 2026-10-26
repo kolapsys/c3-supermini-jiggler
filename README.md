@@ -5,7 +5,8 @@ provides power and serial logging; the computer pairs with **BT Mouse** over
 Bluetooth. No physical mouse is connected to the C3. When enabled and connected,
 the C3 waits for the configured idle timeout, then moves the cursor around a
 configurable square and sends a brief left-click. It repeats at the configured
-interval.
+interval. A configurable run duration can turn jiggling off automatically;
+zero means it can run indefinitely.
 
 ![ESP32-S3 Super Mini pinout illustration supplied by the project owner](assets/pinout_esp32c3_super_mini.png)
 
@@ -24,7 +25,8 @@ restart pairing and erase all saved BLE bonds. The LED keeps blinking until a
 BLE computer connects and remains connected for 2 seconds. Brief connections
 that drop resume the pairing blink. After a stable connection, the LED flashes
 three times over three seconds, then returns to the normal enabled/disabled
-state. Enabling the function starts the configured idle timeout.
+state. Enabling the function starts the configured idle timeout and run-duration
+timer. The run-duration timer continues while the computer is disconnected.
 
 ## Hardware and software
 
@@ -50,13 +52,17 @@ Use the browser installer on a desktop computer with the latest Chrome or Edge:
 3. Click **Install**, select the ESP32-C3 serial port, and approve installation.
 4. Select a firmware version. The installer checks GitHub for published
    releases and notifies you when a newer stable release is available.
-5. Set the idle timeout, repeat interval, and square size on the page. Click
-   **Save settings to C3** and select the board's serial port again.
+5. Set the idle timeout, repeat interval, square size, and maximum run time on
+   the page. Click **Save settings to C3** and select the board's serial port
+   again.
 6. Pair **BT Mouse** in your computer's Bluetooth settings.
 
 The initial settings are a 10-second idle timeout, a 60-second repeat interval,
-and a 10-pixel square. Timeout and interval accept 1–3600 seconds; square size
-accepts 1–100 pixels. Settings are stored on the C3 and survive restarts.
+and a 10-pixel square; maximum run time defaults to 0 (indefinite). Timeout
+and interval accept 1–3600 seconds, square size accepts 1–100 pixels, and run
+time accepts 0–1440 minutes. The countdown starts when BOOT enables the
+jiggler and continues while the computer is disconnected. Settings are stored
+on the C3 and survive restarts.
 Reapply them after flashing, which clears saved settings and BLE bonds.
 
 If the installer says no device is available, try a USB data cable that supports
@@ -118,7 +124,9 @@ startup messages.
    bonds, so computers must pair again.
 5. Check the serial monitor for BLE connection and jiggle-cycle messages.
    The monitor logs the configured idle timeout, repeat interval, and square
-   edge at startup, after settings are saved, and when a jiggle begins.
+   edge and run duration at startup, after settings are saved, and when a
+   jiggle begins. A finite run duration automatically disables jiggling when
+   its timer expires.
    Disconnect messages include the reason text and how long the link was up.
 
 ## Test the idle timer
@@ -132,10 +140,11 @@ g++ -std=c++17 -Wall -Wextra -Werror -Iinclude \
 /tmp/mouse_activity_tests
 ```
 
-The hardware-independent tests cover idle timer behavior and validation of the
-installer's serial settings command. The 10-second idle timeout, 60-second
-repeat interval, and 10-pixel square are the defaults; use the browser
-installer to change them.
+The hardware-independent tests cover idle timer behavior, run-duration
+expiration, and validation of the installer's serial settings command. The
+10-second idle timeout, 60-second repeat interval, 10-pixel square, and
+unlimited run duration are the defaults; use the browser installer to change
+them.
 
 ## Support
 

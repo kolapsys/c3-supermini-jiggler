@@ -7,12 +7,15 @@ struct JigglerConfig {
     uint32_t idleTimeoutSeconds = 10;
     uint32_t repeatIntervalSeconds = 60;
     uint32_t squareSidePixels = 10;
+    uint32_t runDurationMinutes = 0;
 };
 
 constexpr uint32_t kMinJigglerTimeoutSeconds = 1;
 constexpr uint32_t kMaxJigglerTimeoutSeconds = 3600;
 constexpr uint32_t kMinJiggleSquareSidePixels = 1;
 constexpr uint32_t kMaxJiggleSquareSidePixels = 100;
+constexpr uint32_t kMaxJigglerRunDurationMinutes = 1440;
+constexpr uint32_t kJigglerRunDurationUnitMs = 60'000;
 
 constexpr bool isValidJigglerConfig(const JigglerConfig& config) {
     return config.idleTimeoutSeconds >= kMinJigglerTimeoutSeconds &&
@@ -20,7 +23,8 @@ constexpr bool isValidJigglerConfig(const JigglerConfig& config) {
            config.repeatIntervalSeconds >= kMinJigglerTimeoutSeconds &&
            config.repeatIntervalSeconds <= kMaxJigglerTimeoutSeconds &&
            config.squareSidePixels >= kMinJiggleSquareSidePixels &&
-           config.squareSidePixels <= kMaxJiggleSquareSidePixels;
+           config.squareSidePixels <= kMaxJiggleSquareSidePixels &&
+           config.runDurationMinutes <= kMaxJigglerRunDurationMinutes;
 }
 
 inline bool parseJigglerConfigCommand(const char* command, JigglerConfig& config) {
@@ -29,9 +33,11 @@ inline bool parseJigglerConfigCommand(const char* command, JigglerConfig& config
         return false;
     }
 
-    uint32_t values[3]{};
+    uint32_t values[4]{};
     const char* position = command + 4;
-    for (size_t index = 0; index < 3; ++index) {
+    size_t valueCount = 0;
+    while (valueCount < 4) {
+        const size_t index = valueCount;
         uint32_t& value = values[index];
         if (*position < '0' || *position > '9') {
             return false;
@@ -46,11 +52,13 @@ inline bool parseJigglerConfigCommand(const char* command, JigglerConfig& config
             ++position;
         } while (*position >= '0' && *position <= '9');
 
-        if (index < 2) {
-            if (*position != ',') {
-                return false;
-            }
-            ++position;
+        ++valueCount;
+        if (*position != ',') {
+            break;
+        }
+        ++position;
+        if (valueCount == 4) {
+            return false;
         }
     }
 
@@ -58,11 +66,30 @@ inline bool parseJigglerConfigCommand(const char* command, JigglerConfig& config
         return false;
     }
 
-    const JigglerConfig parsed{values[0], values[1], values[2]};
+    if (valueCount != 3 && valueCount != 4) {
+        return false;
+    }
+
+    const JigglerConfig parsed{
+        values[0],
+        values[1],
+        values[2],
+        valueCount == 4 ? values[3] : 0,
+    };
     if (!isValidJigglerConfig(parsed)) {
         return false;
     }
 
     config = parsed;
     return true;
+}
+
+constexpr bool hasJigglerRunDurationExpired(
+    uint32_t durationMinutes,
+    uint32_t enabledAtMs,
+    uint32_t nowMs
+) {
+    return durationMinutes != 0 &&
+           static_cast<uint32_t>(nowMs - enabledAtMs) >=
+               durationMinutes * kJigglerRunDurationUnitMs;
 }

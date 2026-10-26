@@ -118,20 +118,29 @@ bool pairingConnectionPending = false;
 uint32_t pairingConnectionStartedAt = 0;
 bool bondDeletionPending = false;
 uint32_t bleConnectionStartedAt = 0;
+uint32_t jigglerEnabledAt = 0;
 char serialCommandBuffer[kSerialCommandBufferSize]{};
 size_t serialCommandLength = 0;
 
 void updateStatusLed(uint32_t now);
 
 void logJigglerConfig() {
-    Serial.printf("Jiggle settings: idle timeout %lu s, interval %lu s, square edge %lu px\n",
-                  static_cast<unsigned long>(jigglerConfig.idleTimeoutSeconds),
-                  static_cast<unsigned long>(jigglerConfig.repeatIntervalSeconds),
-                  static_cast<unsigned long>(jigglerConfig.squareSidePixels));
+    Serial.printf(
+        "Jiggle settings: idle timeout %lu s, interval %lu s, square edge %lu px, run duration %lu min\n",
+        static_cast<unsigned long>(jigglerConfig.idleTimeoutSeconds),
+        static_cast<unsigned long>(jigglerConfig.repeatIntervalSeconds),
+        static_cast<unsigned long>(jigglerConfig.squareSidePixels),
+        static_cast<unsigned long>(jigglerConfig.runDurationMinutes));
 }
 
 void loadJigglerConfig() {
-    static_assert(sizeof(JigglerConfig) == 3 * sizeof(uint32_t));
+    static_assert(sizeof(JigglerConfig) == 4 * sizeof(uint32_t));
+    struct LegacyJigglerConfig {
+        uint32_t idleTimeoutSeconds;
+        uint32_t repeatIntervalSeconds;
+        uint32_t squareSidePixels;
+    };
+    static_assert(sizeof(LegacyJigglerConfig) == 3 * sizeof(uint32_t));
     Preferences preferences;
     if (!preferences.begin("jiggler", true)) {
         Serial.println("ERROR: Could not open settings storage; using defaults");
@@ -147,6 +156,25 @@ void loadJigglerConfig() {
             jigglerConfig = storedConfig;
         } else {
             Serial.println("WARNING: Stored settings are invalid; using defaults");
+        }
+    } else if (storedSize == sizeof(LegacyJigglerConfig)) {
+        LegacyJigglerConfig storedConfig;
+        if (preferences.getBytes("config", &storedConfig, sizeof(storedConfig)) ==
+            sizeof(storedConfig)) {
+            const JigglerConfig migratedConfig{
+                storedConfig.idleTimeoutSeconds,
+                storedConfig.repeatIntervalSeconds,
+                storedConfig.squareSidePixels,
+                0,
+            };
+            if (isValidJigglerConfig(migratedConfig)) {
+                jigglerConfig = migratedConfig;
+                Serial.println("Loaded legacy saved settings; run duration defaults to unlimited");
+            } else {
+                Serial.println("WARNING: Stored settings are invalid; using defaults");
+            }
+        } else {
+            Serial.println("WARNING: Could not read saved settings; using defaults");
         }
     } else if (storedSize != 0) {
         Serial.println("WARNING: Stored settings have an unsupported size; using defaults");
@@ -355,10 +383,11 @@ void processIdleJiggle(uint32_t now) {
         jiggleStep = 0;
         nextJiggleStepAt = now;
         Serial.printf(
-            "Idle timeout reached; starting jiggle (idle timeout %lu s, interval %lu s, square edge %lu px) and left-click\n",
+            "Idle timeout reached; starting jiggle (idle timeout %lu s, interval %lu s, square edge %lu px, run duration %lu min) and left-click\n",
             static_cast<unsigned long>(jigglerConfig.idleTimeoutSeconds),
             static_cast<unsigned long>(jigglerConfig.repeatIntervalSeconds),
-            static_cast<unsigned long>(jigglerConfig.squareSidePixels));
+            static_cast<unsigned long>(jigglerConfig.squareSidePixels),
+            static_cast<unsigned long>(jigglerConfig.runDurationMinutes));
     }
 
     if (static_cast<int32_t>(now - nextJiggleStepAt) < 0) {
@@ -450,11 +479,36 @@ void toggleJiggler(uint32_t now) {
     jiggleEnabled = !jiggleEnabled;
     jiggleSequenceActive = false;
     activity.noteActivity(now);
+    if (jiggleEnabled) {
+        jigglerEnabledAt = now;
+    }
     if (!jiggleEnabled && hidServer->getConnectedCount() > 0) {
         notifyHost(0, 0, 0);
     }
     updateStatusLed(now);
-    Serial.printf("Jiggler %s\n", jiggleEnabled ? "enabled" : "disabled");
+    Serial.printf("Jiggler %s%s\n",
+                  jiggleEnabled ? "enabled" : "disabled",
+                  jiggleEnabled && jigglerConfig.runDurationMinutes > 0
+                      ? " (run duration timer started)"
+                      : "");
+}
+
+void updateJigglerRunDuration(uint32_t now) {
+    if (!jiggleEnabled ||
+        !hasJigglerRunDurationExpired(jigglerConfig.runDurationMinutes,
+                                      jigglerEnabledAt,
+                                      now)) {
+        return;
+    }
+
+    jiggleEnabled = false;
+    jiggleSequenceActive = false;
+    if (hidServer->getConnectedCount() > 0) {
+        notifyHost(0, 0, 0);
+    }
+    updateStatusLed(now);
+    Serial.printf("Jiggler run duration expired after %lu minutes; disabled\n",
+                  static_cast<unsigned long>(jigglerConfig.runDurationMinutes));
 }
 
 void updateButton(uint32_t now) {
@@ -563,6 +617,7 @@ void loop() {
     processSerialCommands();
     const uint32_t now = millis();
     updateButton(now);
+    updateJigglerRunDuration(now);
     updateStatusLed(now);
     processPendingBondDeletion();
     processPairingConnection(now);
