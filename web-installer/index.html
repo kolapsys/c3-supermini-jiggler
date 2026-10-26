@@ -53,6 +53,17 @@
         font: inherit;
       }
 
+      input[type="number"] {
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button {
+        margin: 0;
+        -webkit-appearance: none;
+      }
+
       button {
         padding: 11px 16px;
         border: 0;
@@ -67,6 +78,13 @@
       button:disabled {
         opacity: .55;
         cursor: wait;
+      }
+
+      button.secondary {
+        margin-right: 8px;
+        border: 1px solid #1459a6;
+        color: #1459a6;
+        background: white;
       }
 
       esp-web-install-button {
@@ -157,6 +175,7 @@
         <p id="run-duration-status" role="status">
           Available with firmware v1.0.1 and newer. Select a firmware version to check.
         </p>
+        <button id="reset-settings" class="secondary" type="button">Reset to defaults</button>
         <button id="save-settings" type="button">Save settings to C3</button>
         <p id="settings-status" role="status" aria-live="polite">
           Flash the firmware first, then reconnect to the board here to save settings.
@@ -189,6 +208,7 @@
     </main>
     <script>
       const settingsButton = document.querySelector("#save-settings");
+      const resetSettingsButton = document.querySelector("#reset-settings");
       const settingsStatus = document.querySelector("#settings-status");
       const versionSelect = document.querySelector("#firmware-version");
       const versionStatus = document.querySelector("#firmware-version-status");
@@ -199,6 +219,20 @@
       const currentManifestUrl = new URL("manifest.json", document.baseURI).href;
       let currentFirmwareVersion = "unknown";
       const serialResponseTimeoutMs = 10000;
+      const defaultSettings = {
+        "idle-timeout": 10,
+        "repeat-interval": 60,
+        "square-size": 10,
+        "run-duration": 0,
+      };
+
+      resetSettingsButton.addEventListener("click", () => {
+        for (const [id, value] of Object.entries(defaultSettings)) {
+          document.getElementById(id).value = value;
+        }
+        settingsStatus.textContent =
+          "Settings reset to defaults in this form. Click Save settings to apply them to the C3.";
+      });
 
       function setFirmwareVersion(value, label, manifestUrl) {
         versionManifests.set(value, {
