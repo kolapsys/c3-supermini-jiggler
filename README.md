@@ -84,6 +84,10 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
+The tag publishes the firmware release. GitHub Pages deployment runs on pushes
+to `main`; after publishing a new release, run the **Build and test** workflow
+manually on `main` to refresh the installer's mirrored version downloads.
+
 The release includes `firmware.bin` (the combined image for browser or manual
 flashing), `manifest.json` (for ESP Web Tools), `version.json`, and
 `firmware.bin.sha256`. Tags containing a hyphen, such as `v1.3.0-rc.1`, are
