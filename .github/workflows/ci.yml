@@ -2,6 +2,10 @@ name: Build and test
 
 on:
   push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
 
@@ -28,13 +32,58 @@ jobs:
         run: pio run
 
       - name: Package browser installer
-        run: python3 scripts/package_web_installer.py
+        env:
+          FIRMWARE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('dev-{0}', github.sha) }}
+        run: python3 scripts/package_web_installer.py --version "$FIRMWARE_VERSION"
 
       - name: Upload browser installer
         uses: actions/upload-artifact@v4
         with:
           name: web-installer
           path: dist/
+
+  release:
+    name: Publish versioned firmware release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download versioned firmware deliverables
+        uses: actions/download-artifact@v4
+        with:
+          name: web-installer
+          path: dist/
+
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" \
+              dist/firmware.bin \
+              dist/manifest.json \
+              dist/version.json \
+              dist/firmware.bin.sha256 \
+              --clobber
+          elif [[ "$TAG_NAME" == *-* ]]; then
+            gh release create "$TAG_NAME" \
+              dist/firmware.bin \
+              dist/manifest.json \
+              dist/version.json \
+              dist/firmware.bin.sha256 \
+              --generate-notes \
+              --prerelease
+          else
+            gh release create "$TAG_NAME" \
+              dist/firmware.bin \
+              dist/manifest.json \
+              dist/version.json \
+              dist/firmware.bin.sha256 \
+              --generate-notes
+          fi
 
   publish-pages:
     name: Publish browser installer

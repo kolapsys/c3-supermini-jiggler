@@ -48,9 +48,11 @@ Use the browser installer on a desktop computer with the latest Chrome or Edge:
 1. Connect the C3 with a USB data cable.
 2. Open the [ESP32-C3 Super Mini Jiggler installer](https://kolapsys.github.io/esp32-c3-supermini-jiggler/).
 3. Click **Install**, select the ESP32-C3 serial port, and approve installation.
-4. Set the idle timeout, repeat interval, and square size on the page. Click
+4. Select a firmware version. The installer checks GitHub for published
+   releases and notifies you when a newer stable release is available.
+5. Set the idle timeout, repeat interval, and square size on the page. Click
    **Save settings to C3** and select the board's serial port again.
-5. Pair **BT Mouse** in your computer's Bluetooth settings.
+6. Pair **BT Mouse** in your computer's Bluetooth settings.
 
 The initial settings are a 10-second idle timeout, a 60-second repeat interval,
 and a 10-pixel square. Timeout and interval accept 1–3600 seconds; square size
@@ -61,7 +63,24 @@ If the installer says no device is available, try a USB data cable that supports
 data. You may also hold BOOT, press and release RESET, then release BOOT and
 retry. The first time this repository is set up, enable GitHub Pages using
 **Settings → Pages → Build and deployment → GitHub Actions**; updates to `main`
-publish the latest installer automatically.
+publish the latest installer automatically. The installer keeps the page's
+firmware as an option and lets you switch among published GitHub releases.
+
+## Firmware releases
+
+Firmware versions are published from Git tags named with a `v` prefix and
+semantic version, such as `v1.2.0`. Push a tag to build a GitHub Release:
+
+```sh
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+The release includes `firmware.bin` (the combined image for browser or manual
+flashing), `manifest.json` (for ESP Web Tools), `version.json`, and
+`firmware.bin.sha256`. Tags containing a hyphen, such as `v1.3.0-rc.1`, are
+published as pre-releases. The installer lists release versions from GitHub;
+the repository's **Releases** page remains available for direct downloads.
 
 ## Build and flash manually
 

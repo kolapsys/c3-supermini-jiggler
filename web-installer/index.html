@@ -43,7 +43,8 @@
         font-weight: 600;
       }
 
-      input {
+      input,
+      select {
         box-sizing: border-box;
         width: 100%;
         padding: 10px 12px;
@@ -83,6 +84,12 @@
         background: #edf5ff;
       }
 
+      .update-notice {
+        padding: 14px 16px;
+        border-left: 4px solid #e4a900;
+        background: #fff8df;
+      }
+
       @media (max-width: 520px) {
         body {
           padding: 20px 12px;
@@ -109,6 +116,18 @@
         <li>Approve the prompt to install the firmware.</li>
         <li>After installation, set the values below and click <strong>Save settings</strong>.</li>
       </ol>
+
+      <section aria-labelledby="firmware-version-title">
+        <h2 id="firmware-version-title">Firmware version</h2>
+        <label for="firmware-version">Choose a release or the version served by this page</label>
+        <select id="firmware-version" aria-describedby="firmware-version-status">
+          <option value="current">This installer build (loading version…)</option>
+        </select>
+        <p id="firmware-version-status" role="status" aria-live="polite">
+          Checking available firmware versions…
+        </p>
+        <p id="firmware-update-notice" class="update-notice" role="status" aria-live="polite" hidden></p>
+      </section>
 
       <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
 
@@ -164,7 +183,166 @@
     <script>
       const settingsButton = document.querySelector("#save-settings");
       const settingsStatus = document.querySelector("#settings-status");
+      const versionSelect = document.querySelector("#firmware-version");
+      const versionStatus = document.querySelector("#firmware-version-status");
+      const updateNotice = document.querySelector("#firmware-update-notice");
+      const versionManifests = new Map();
+      const currentManifestUrl = new URL("manifest.json", document.baseURI).href;
+      let currentFirmwareVersion = "unknown";
       const serialResponseTimeoutMs = 10000;
+
+      function setFirmwareVersion(value, label, manifestUrl) {
+        versionManifests.set(value, manifestUrl);
+        if (value === "current") {
+          versionSelect.options[0].textContent = label;
+          return;
+        }
+        versionSelect.add(new Option(label, value));
+      }
+
+      function setInstallerManifest(manifestUrl) {
+        const existingButton = document.querySelector("esp-web-install-button");
+        const replacementButton = document.createElement("esp-web-install-button");
+        replacementButton.setAttribute("manifest", manifestUrl);
+        existingButton.replaceWith(replacementButton);
+      }
+
+      function parseReleaseVersion(version) {
+        const match = version.match(
+          /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/
+        );
+        return match
+          ? { core: match.slice(1, 4).map(Number), prerelease: match[4] || null }
+          : null;
+      }
+
+      function isVersionNewer(candidate, current) {
+        const candidateVersion = parseReleaseVersion(candidate);
+        const currentVersion = parseReleaseVersion(current);
+        if (!candidateVersion || !currentVersion) {
+          return false;
+        }
+        for (let index = 0; index < candidateVersion.core.length; index += 1) {
+          if (candidateVersion.core[index] !== currentVersion.core[index]) {
+            return candidateVersion.core[index] > currentVersion.core[index];
+          }
+        }
+        if (candidateVersion.prerelease === currentVersion.prerelease) {
+          return false;
+        }
+        if (candidateVersion.prerelease === null) {
+          return true;
+        }
+        if (currentVersion.prerelease === null) {
+          return false;
+        }
+        return candidateVersion.prerelease.localeCompare(
+          currentVersion.prerelease,
+          undefined,
+          { numeric: true }
+        ) > 0;
+      }
+
+      versionSelect.addEventListener("change", () => {
+        const manifestUrl = versionManifests.get(versionSelect.value);
+        if (manifestUrl) {
+          setInstallerManifest(manifestUrl);
+        }
+      });
+
+      async function loadFirmwareVersions() {
+        setFirmwareVersion(
+          "current",
+          "This installer build (loading version…)",
+          currentManifestUrl
+        );
+        try {
+          const currentResponse = await fetch(new URL("version.json", document.baseURI));
+          if (!currentResponse.ok) {
+            throw new Error(`Version metadata request failed (${currentResponse.status}).`);
+          }
+          const currentMetadata = await currentResponse.json();
+          if (typeof currentMetadata.version !== "string" || !currentMetadata.version) {
+            throw new Error("The installer version metadata is invalid.");
+          }
+          currentFirmwareVersion = currentMetadata.version;
+          versionManifests.set("current", currentManifestUrl);
+          versionSelect.options[0].textContent =
+            `This installer build (${currentFirmwareVersion})`;
+        } catch {
+          versionSelect.options[0].textContent = "This installer build (local preview)";
+        }
+
+        try {
+          const releasesResponse = await fetch(
+            "https://api.github.com/repos/kolapsys/esp32-c3-supermini-jiggler/releases?per_page=100",
+            { headers: { Accept: "application/vnd.github+json" } }
+          );
+          if (!releasesResponse.ok) {
+            throw new Error(`GitHub release check failed (${releasesResponse.status}).`);
+          }
+
+          const releases = await releasesResponse.json();
+          if (!Array.isArray(releases)) {
+            throw new Error("GitHub returned an invalid release list.");
+          }
+
+          let latestStableRelease = null;
+          let releaseCount = 0;
+          for (const release of releases) {
+            if (release.draft || typeof release.tag_name !== "string") {
+              continue;
+            }
+            const manifestAsset = release.assets?.find(
+              (asset) => asset.name === "manifest.json"
+            );
+            if (!manifestAsset || typeof manifestAsset.browser_download_url !== "string") {
+              continue;
+            }
+
+            const manifestUrl = new URL(manifestAsset.browser_download_url);
+            if (
+              manifestUrl.protocol !== "https:" ||
+              manifestUrl.hostname !== "github.com"
+            ) {
+              continue;
+            }
+
+            if (!release.prerelease && latestStableRelease === null) {
+              latestStableRelease = release;
+            }
+            if (release.tag_name === currentFirmwareVersion) {
+              continue;
+            }
+
+            setFirmwareVersion(
+              manifestUrl.href,
+              `${release.tag_name}${release.prerelease ? " (pre-release)" : ""}`,
+              manifestUrl.href
+            );
+            releaseCount += 1;
+          }
+
+          versionStatus.textContent = releaseCount > 0
+            ? `${releaseCount} published firmware version${releaseCount === 1 ? "" : "s"} available.`
+            : "No other published firmware versions are available yet.";
+
+          if (
+            latestStableRelease &&
+            (!parseReleaseVersion(currentFirmwareVersion) ||
+              isVersionNewer(latestStableRelease.tag_name, currentFirmwareVersion))
+          ) {
+            updateNotice.hidden = false;
+            updateNotice.textContent =
+              `A newer firmware release (${latestStableRelease.tag_name}) is available. Select it above to install.`;
+          }
+        } catch (error) {
+          versionStatus.textContent =
+            `Could not check GitHub releases: ${error.message} You can still install this page’s firmware.`;
+        }
+      }
+
+      loadFirmwareVersions();
 
       settingsButton.addEventListener("click", async () => {
         const fields = [

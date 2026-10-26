@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -30,6 +33,20 @@ FLASH_IMAGES = (
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--version",
+        default=os.environ.get("FIRMWARE_VERSION", "dev-local"),
+        help="firmware release version (for example v1.2.0)",
+    )
+    args = parser.parse_args()
+    if args.version.startswith("v") and not re.fullmatch(
+        r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+        r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?",
+        args.version,
+    ):
+        parser.error("tag versions must use semantic version format, such as v1.2.3")
+
     images: list[tuple[int, bytes]] = []
     image_end = 0
     for offset, path in FLASH_IMAGES:
@@ -47,12 +64,19 @@ def main() -> None:
     for offset, data in images:
         firmware[offset : offset + len(data)] = data
 
+    manifest_version = args.version
+    if manifest_version.startswith("v"):
+        manifest_version = manifest_version[1:]
+    elif manifest_version.startswith("dev-"):
+        manifest_version = f"0.0.0-{manifest_version[4:]}"
+
     DIST.mkdir(exist_ok=True)
-    (DIST / "firmware.bin").write_bytes(firmware)
+    firmware_path = DIST / "firmware.bin"
+    firmware_path.write_bytes(firmware)
     shutil.copyfile(ROOT / "web-installer" / "index.html", DIST / "index.html")
     manifest = {
         "name": "ESP32-C3 Super Mini Jiggler",
-        "version": "1.0.0",
+        "version": manifest_version,
         "builds": [
             {
                 "chipFamily": "ESP32-C3",
@@ -63,7 +87,14 @@ def main() -> None:
     (DIST / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"Packaged {len(firmware)} bytes into {DIST / 'firmware.bin'}")
+    (DIST / "version.json").write_text(
+        json.dumps({"version": args.version}, indent=2) + "\n", encoding="utf-8"
+    )
+    checksum = hashlib.sha256(firmware).hexdigest()
+    (DIST / "firmware.bin.sha256").write_text(
+        f"{checksum}  firmware.bin\n", encoding="ascii"
+    )
+    print(f"Packaged version {args.version}: {len(firmware)} bytes into {firmware_path}")
 
 
 if __name__ == "__main__":
