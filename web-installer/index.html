@@ -293,20 +293,24 @@
             if (release.draft || typeof release.tag_name !== "string") {
               continue;
             }
-            const manifestAsset = release.assets?.find(
+            const hasManifest = release.assets?.some(
               (asset) => asset.name === "manifest.json"
             );
-            if (!manifestAsset || typeof manifestAsset.browser_download_url !== "string") {
-              continue;
-            }
-
-            const manifestUrl = new URL(manifestAsset.browser_download_url);
+            const hasFirmware = release.assets?.some(
+              (asset) => asset.name === "firmware.bin"
+            );
             if (
-              manifestUrl.protocol !== "https:" ||
-              manifestUrl.hostname !== "github.com"
+              !hasManifest ||
+              !hasFirmware ||
+              !/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(release.tag_name)
             ) {
               continue;
             }
+
+            const manifestUrl = new URL(
+              `versions/${encodeURIComponent(release.tag_name)}/manifest.json`,
+              document.baseURI
+            );
 
             if (!release.prerelease && latestStableRelease === null) {
               latestStableRelease = release;

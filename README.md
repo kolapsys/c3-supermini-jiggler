@@ -65,6 +65,8 @@ retry. The first time this repository is set up, enable GitHub Pages using
 **Settings → Pages → Build and deployment → GitHub Actions**; updates to `main`
 publish the latest installer automatically. The installer keeps the page's
 firmware as an option and lets you switch among published GitHub releases.
+Published release manifests and firmware images are mirrored to GitHub Pages
+so the browser installer can download older versions from the same site.
 
 ## Firmware releases
 
